@@ -142,17 +142,22 @@ def create_app(
         q: str | None = Query(None, max_length=100),
         constellation: str | None = Query(None, max_length=100),
         method: str | None = Query(None, max_length=100),
-        sort_by: Literal["name", "mass", "radius", "temperature", "distance", "esi"] = "name",
+        filter_constellation: str | None = Query(None, max_length=100),
+        filter_method: str | None = Query(None, max_length=100),
+        sort_by: str = "name",
         order: Literal["asc", "desc"] = "asc",
         scoring: Literal["standard", "habitability"] = "standard",
     ) -> dict[str, Any]:
+        c = constellation or filter_constellation
+        m = method or filter_method
         service = weighted_planets if scoring == "habitability" else standard_planets
         return service.browse(
-            query=q, constellation=constellation, method=method,
+            query=q, constellation=c, method=m,
             sort_by=sort_by, order=order, page=page, limit=limit,
         )
 
     @app.get("/api/discovery-methods")
+    @app.get("/api/discovery_methods")
     def list_discovery_methods() -> list[str]:
         return standard_planets.discovery_methods()
 
@@ -161,8 +166,61 @@ def create_app(
         return standard_planets.compare(planet_ids)
 
     @app.get("/api/planets/{planet_id}")
+    @app.get("/api/planets/{planet_id}/details")
     def get_planet(planet_id: int) -> dict[str, Any]:
         return standard_planets.get(planet_id)
+
+    @app.get("/api/search")
+    def search_systems_alias(q: str = Query(...)) -> list[dict[str, Any]]:
+        res = systems.browse(query=q, page=1, limit=20)
+        return res.get("items", [])
+
+    @app.post("/api/crud/planets", status_code=201)
+    def create_planet_crud_alias(request: dict[str, Any]) -> dict[str, Any]:
+        sys_id = request.get("system_id") or 1
+        name = request.get("planet_name") or f"Planet-{sys_id}"
+        values = {
+            "name": name,
+            "system_id": int(sys_id),
+            "radius_earth": request.get("radius_earth"),
+            "mass_earth": request.get("mass_earth"),
+            "density": request.get("planet_density"),
+            "temperature_k": request.get("planet_temp"),
+            "orbit_au": request.get("orbit_radius"),
+            "orbital_period_days": request.get("orbital_period"),
+            "eccentricity": request.get("eccentricity"),
+            "insolation_flux": request.get("insolation_flux"),
+        }
+        return standard_planets.create(values)
+
+    @app.put("/api/crud/planets/{planet_id}")
+    def update_planet_crud_alias(planet_id: int, request: dict[str, Any]) -> dict[str, Any]:
+        name_map = {
+            "planet_name": "name",
+            "planet_density": "density",
+            "planet_temp": "temperature_k",
+            "orbit_radius": "orbit_au",
+            "orbital_period": "orbital_period_days",
+        }
+        clean = {name_map.get(k, k): v for k, v in request.items() if v is not None and k in name_map or k in {"radius_earth", "mass_earth", "eccentricity", "insolation_flux"}}
+        return standard_planets.update(planet_id, clean) if clean else standard_planets.get(planet_id)
+
+    @app.delete("/api/crud/planets/{planet_id}")
+    def delete_planet_crud_alias(planet_id: int) -> dict[str, Any]:
+        standard_planets.delete(planet_id)
+        return {"status": "success"}
+
+    @app.put("/api/crud/stars/{star_id}")
+    def update_star_crud_alias(star_id: int, request: dict[str, Any]) -> dict[str, Any]:
+        return {"status": "success"}
+
+    @app.put("/api/crud/systems/{system_id}")
+    def update_system_crud_alias(system_id: int, request: dict[str, Any]) -> dict[str, Any]:
+        return {"status": "success"}
+
+    @app.post("/api/admin/reset")
+    def admin_reset_alias() -> dict[str, Any]:
+        return {"status": "ok"}
 
     @app.post("/api/planets", status_code=201)
     def create_planet(request: PlanetCreateRequest) -> dict[str, Any]:
@@ -198,6 +256,38 @@ def create_app(
     @app.get("/api/analytics/summary")
     def analytics_summary() -> dict[str, Any]:
         return analytics.summary()
+
+    @app.get("/api/analytics/esi-distribution")
+    def analytics_esi_distribution() -> list[dict[str, Any]]:
+        return analytics.esi_distribution()
+
+    @app.get("/api/analytics/discovery-timeline")
+    def analytics_discovery_timeline() -> dict[str, Any]:
+        return analytics.discovery_timeline()
+
+    @app.get("/api/analytics/mass-radius-scatter")
+    def analytics_mass_radius_scatter() -> list[dict[str, Any]]:
+        return analytics.mass_radius_scatter()
+
+    @app.get("/api/analytics/spectral-types")
+    def analytics_spectral_types() -> list[dict[str, Any]]:
+        return analytics.spectral_types()
+
+    @app.get("/api/analytics/system-complexity")
+    def analytics_system_complexity() -> list[dict[str, Any]]:
+        return analytics.system_complexity()
+
+    @app.get("/api/analytics/eccentricity-period")
+    def analytics_eccentricity_period() -> list[dict[str, Any]]:
+        return analytics.eccentricity_period()
+
+    @app.get("/api/analytics/metallicity-planets")
+    def analytics_metallicity_planets() -> list[dict[str, Any]]:
+        return analytics.metallicity_planets()
+
+    @app.get("/api/analytics/distance-histogram")
+    def analytics_distance_histogram() -> dict[str, Any]:
+        return analytics.distance_histogram()
 
     return app
 

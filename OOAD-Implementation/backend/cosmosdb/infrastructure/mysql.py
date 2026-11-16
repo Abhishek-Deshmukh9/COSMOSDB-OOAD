@@ -32,14 +32,17 @@ PLANET_SELECT = """
     SELECT p.planet_id, p.planet_name, p.system_id, s.system_name, p.discovery_id,
            p.radius_earth, p.mass_earth, p.planet_density, p.planet_temp,
            p.orbit_radius, p.orbital_period, p.eccentricity, p.insolation_flux,
-           d.discovery_year, d.discovery_method, c.constellation_name,
-           st.star_temp, st.star_radius, st.star_mass, st.star_luminosity
+           d.discovery_year, d.discovery_method, d.discovery_facility, c.constellation_name,
+           s.distance_ly,
+           st.star_temp, st.star_radius, st.star_mass, st.star_luminosity,
+           st.spectral_type, st.star_metallicity
     FROM planet p
     JOIN starsystem s ON s.system_id = p.system_id
     LEFT JOIN constellation c ON c.constellation_id = s.constellation_id
     LEFT JOIN discovery d ON d.discovery_id = p.discovery_id
     LEFT JOIN (
         SELECT star_id, system_id, star_temp, star_radius, star_mass, star_luminosity,
+               spectral_type, star_metallicity,
                ROW_NUMBER() OVER (PARTITION BY system_id ORDER BY star_id) AS row_num
         FROM star
     ) st ON st.system_id = s.system_id AND st.row_num = 1
@@ -80,6 +83,10 @@ def _planet(row: dict[str, Any]) -> Planet:
         "star_radius_solar": _number(row.get("star_radius")),
         "star_mass_solar": _number(row.get("star_mass")),
         "star_luminosity_log10": _number(row.get("star_luminosity")),
+        "distance_ly": _number(row.get("distance_ly")),
+        "discovery_facility": row.get("discovery_facility"),
+        "star_spectral_type": row.get("spectral_type"),
+        "star_metallicity": _number(row.get("star_metallicity")),
     }
     builder = PlanetBuilder()
     for field, value in values.items():

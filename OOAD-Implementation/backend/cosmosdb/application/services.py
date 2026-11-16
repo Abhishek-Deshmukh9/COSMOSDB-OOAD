@@ -1,11 +1,13 @@
 from __future__ import annotations
 
-from collections import Counter
+from collections import Counter, defaultdict
+import math
 from typing import Any
 
 from cosmosdb.application.events import CatalogChanged, CatalogEventPublisher
 from cosmosdb.domain.entities import Planet, PlanetBuilder, PlanetCatalogRecord, Star, StarSystem
 from cosmosdb.domain.esi import ESICalculator
+from cosmosdb.domain.services.planet_classifier import PlanetClassifier
 from cosmosdb.domain.value_objects import CelestialCoordinates
 from .ports import IConstellationRepository, IPlanetRepository, IStarSystemRepository
 
@@ -26,6 +28,10 @@ class PlanetCatalogService:
     def browse(self, *, query: str | None = None, constellation: str | None = None,
                method: str | None = None, sort_by: str = "name", order: str = "asc",
                page: int = 1, limit: int = 50) -> dict[str, Any]:
+        if sort_by == "esi_score":
+            sort_by = "esi"
+        elif sort_by == "temp":
+            sort_by = "temperature"
         if sort_by not in {"name", "mass", "radius", "temperature", "distance", "esi"}:
             raise ValueError("Unsupported planet sort field.")
         if order not in {"asc", "desc"}:
@@ -48,8 +54,10 @@ class PlanetCatalogService:
                 query=query, constellation=constellation, method=method,
                 sort_by=sort_by, order=order, page=page, limit=limit,
             )
+        serialized = [self._serialize(planet) for planet in planets]
         return {
-            "planets": [self._serialize(planet) for planet in planets],
+            "items": serialized,
+            "planets": serialized,
             "total": total,
             "page": page,
             "limit": limit,
@@ -131,9 +139,11 @@ class PlanetCatalogService:
 
     def _serialize(self, planet: Planet) -> dict[str, Any]:
         esi = self._calculator.calculate(planet)
+        archetype = PlanetClassifier.classify(planet)
         return {
             "planet_id": planet.planet_id,
             "planet_name": planet.name,
+            "planet_type": archetype.value,
             "system_id": planet.system_id,
             "system_name": planet.system_name,
             "discovery_id": planet.discovery_id,
@@ -148,6 +158,18 @@ class PlanetCatalogService:
             "discovery_year": planet.discovery_year,
             "discovery_method": planet.discovery_method,
             "constellation_name": planet.constellation_name,
+            "star_id": planet.system_id,
+            "star_name": planet.system_name,
+            "star_temp": planet.star_temperature_k,
+            "star_radius": planet.star_radius_solar,
+            "star_mass": planet.star_mass_solar,
+            "star_luminosity": planet.star_luminosity_log10,
+            "star_spectral_type": planet.star_spectral_type,
+            "distance_ly": planet.distance_ly,
+            "discovery_facility": planet.discovery_facility,
+            "num_stars": 1,
+            "num_planets": 1,
+            "num_moons": 0,
             "esi_score": esi.score,
             "esi": {
                 "interior": esi.interior,
@@ -171,7 +193,7 @@ class StarSystemCatalogService:
         if page < 1 or limit < 1 or limit > 100:
             raise ValueError("Page must be positive and limit must be between 1 and 100.")
         rows, total = self._systems.list(query=query, constellation=constellation, page=page, limit=limit)
-        return {"systems": rows, "total": total, "page": page, "limit": limit,
+        return {"systems": rows, "items": rows, "total": total, "page": page, "limit": limit,
                 "pages": max(1, (total + limit - 1) // limit)}
 
     def get(self, system_id: int) -> dict[str, Any]:
@@ -246,26 +268,226 @@ class AnalyticsService:
     def __init__(self, planets: IPlanetRepository, systems: IStarSystemRepository | None = None) -> None:
         self._planets = planets
         self._systems = systems
-        self._cached_summary: dict[str, Any] | None = None
+        self._cache: dict[str, Any] = {}
+        self._cached_planets: list[Planet] | None = None
+
+    def _get_planets(self) -> list[Planet]:
+        if self._cached_planets is None:
+            self._cached_planets = self._planets.all_for_analytics()
+        return self._cached_planets
 
     def summary(self) -> dict[str, Any]:
-        if self._cached_summary is not None:
-            return dict(self._cached_summary)
-        planets = self._planets.all_for_analytics()
+        if "summary" in self._cache:
+            return dict(self._cache["summary"])
+        planets = self._get_planets()
         scores = [score for planet in planets if (score := ESICalculator().calculate(planet).score) is not None]
         methods = Counter(planet.discovery_method for planet in planets if planet.discovery_method)
-        self._cached_summary = {
-            "planet_count": len(planets),
-            "system_count": (
-                self._systems.count()
-                if self._systems is not None
-                else len({planet.system_id for planet in planets})
-            ),
-            "average_esi": sum(scores) / len(scores) if scores else None,
+        facilities = Counter(planet.discovery_facility for planet in planets if planet.discovery_facility)
+
+        system_planet_counts = Counter(planet.system_id for planet in planets)
+        multi_planet_count = sum(1 for count in system_planet_counts.values() if count > 1)
+        constellation_names = {planet.constellation_name for planet in planets if planet.constellation_name}
+        unique_stars = len({planet.system_id for planet in planets})
+
+        top_fac_name, top_fac_count = facilities.most_common(1)[0] if facilities else ("N/A", 0)
+        total_planets = len(planets)
+        system_count = (
+            self._systems.count()
+            if self._systems is not None
+            else len(system_planet_counts)
+        )
+        avg_esi = sum(scores) / len(scores) if scores else None
+
+        self._cache["summary"] = {
+            "planet_count": total_planets,
+            "system_count": system_count,
+            "average_esi": avg_esi,
             "scored_planet_count": len(scores),
             "top_discovery_method": methods.most_common(1)[0][0] if methods else None,
+            "total_planets": total_planets,
+            "multi_planet_systems": multi_planet_count,
+            "constellations_cataloged": len(constellation_names),
+            "unique_stars": unique_stars,
+            "discovery_methods": len(methods),
+            "top_discovery_facility": {
+                "name": top_fac_name,
+                "count": top_fac_count,
+            },
         }
-        return dict(self._cached_summary)
+        return dict(self._cache["summary"])
+
+    def esi_distribution(self) -> list[dict[str, Any]]:
+        if "esi_distribution" in self._cache:
+            return list(self._cache["esi_distribution"])
+        planets = self._get_planets()
+        tier_counts = {"Earth-like": 0, "Potential": 0, "Extreme": 0, "Inhospitable": 0, "Unknown": 0}
+        for planet in planets:
+            score = ESICalculator().calculate(planet).score
+            if score is None:
+                tier_counts["Unknown"] += 1
+            elif score >= 0.8:
+                tier_counts["Earth-like"] += 1
+            elif score >= 0.6:
+                tier_counts["Potential"] += 1
+            elif score >= 0.4:
+                tier_counts["Extreme"] += 1
+            else:
+                tier_counts["Inhospitable"] += 1
+        result = [{"tier": tier, "count": count} for tier, count in tier_counts.items()]
+        self._cache["esi_distribution"] = result
+        return result
+
+    def discovery_timeline(self) -> dict[str, Any]:
+        if "discovery_timeline" in self._cache:
+            return dict(self._cache["discovery_timeline"])
+        planets = self._get_planets()
+        pairs = [
+            (int(planet.discovery_year), str(planet.discovery_method))
+            for planet in planets
+            if planet.discovery_year is not None and planet.discovery_method
+        ]
+        if not pairs:
+            result = {"years": [], "methods": [], "series": {}}
+        else:
+            years = sorted(list({year for year, _ in pairs}))
+            methods = sorted(list({method for _, method in pairs}))
+            counts_map = Counter(pairs)
+            series = {
+                method: [counts_map.get((year, method), 0) for year in years]
+                for method in methods
+            }
+            result = {"years": years, "methods": methods, "series": series}
+        self._cache["discovery_timeline"] = result
+        return result
+
+    def mass_radius_scatter(self) -> list[dict[str, Any]]:
+        if "mass_radius_scatter" in self._cache:
+            return list(self._cache["mass_radius_scatter"])
+        planets = self._get_planets()
+        result = [
+            {
+                "mass": float(p.mass_earth),
+                "radius": float(p.radius_earth),
+                "temp": float(p.temperature_k) if p.temperature_k is not None else None,
+                "name": p.name,
+            }
+            for p in planets
+            if p.mass_earth is not None and p.radius_earth is not None
+        ]
+        self._cache["mass_radius_scatter"] = result
+        return result
+
+    def spectral_types(self) -> list[dict[str, Any]]:
+        if "spectral_types" in self._cache:
+            return list(self._cache["spectral_types"])
+        planets = self._get_planets()
+        seen_systems: set[int] = set()
+        counts: dict[str, int] = defaultdict(int)
+        for p in planets:
+            if p.system_id in seen_systems:
+                continue
+            seen_systems.add(p.system_id)
+            st = p.star_spectral_type
+            if not st or not isinstance(st, str) or not st.strip():
+                counts["Unknown"] += 1
+            else:
+                first = st.strip()[0].upper()
+                if first in "OBAFGKM":
+                    counts[first] += 1
+                else:
+                    counts["Other"] += 1
+        order = ["O", "B", "A", "F", "G", "K", "M", "Other", "Unknown"]
+        result = [{"type": s, "count": counts[s]} for s in order if s in counts]
+        self._cache["spectral_types"] = result
+        return result
+
+    def system_complexity(self) -> list[dict[str, Any]]:
+        if "system_complexity" in self._cache:
+            return list(self._cache["system_complexity"])
+        planets = self._get_planets()
+        system_counts = Counter(p.system_id for p in planets)
+        planet_num_to_systems = Counter(system_counts.values())
+        result: list[dict[str, Any]] = []
+        for n in range(1, 9):
+            result.append({"planet_count": n, "systems": planet_num_to_systems.get(n, 0)})
+        over8 = sum(count for n, count in planet_num_to_systems.items() if n >= 9)
+        if over8 > 0:
+            result.append({"planet_count": "8+", "systems": over8})
+        self._cache["system_complexity"] = result
+        return result
+
+    def eccentricity_period(self) -> list[dict[str, Any]]:
+        if "eccentricity_period" in self._cache:
+            return list(self._cache["eccentricity_period"])
+        planets = self._get_planets()
+        result = [
+            {
+                "period": float(p.orbital_period_days),
+                "eccentricity": float(p.eccentricity),
+                "name": p.name,
+            }
+            for p in planets
+            if p.orbital_period_days is not None and p.eccentricity is not None
+        ]
+        self._cache["eccentricity_period"] = result
+        return result
+
+    def metallicity_planets(self) -> list[dict[str, Any]]:
+        if "metallicity_planets" in self._cache:
+            return list(self._cache["metallicity_planets"])
+        planets = self._get_planets()
+        system_planet_counts = Counter(p.system_id for p in planets)
+        seen_systems: set[int] = set()
+        points: list[dict[str, Any]] = []
+        for p in planets:
+            if p.system_id in seen_systems:
+                continue
+            seen_systems.add(p.system_id)
+            if p.star_metallicity is not None:
+                points.append({
+                    "metallicity": float(p.star_metallicity),
+                    "num_planets": system_planet_counts[p.system_id],
+                    "system": p.system_name,
+                })
+        self._cache["metallicity_planets"] = points
+        return points
+
+    def distance_histogram(self) -> dict[str, Any]:
+        if "distance_histogram" in self._cache:
+            return dict(self._cache["distance_histogram"])
+        planets = self._get_planets()
+        distances = [float(p.distance_ly) for p in planets if p.distance_ly is not None and p.distance_ly > 0]
+        if not distances:
+            result = {"bins": [], "counts": [], "bin_edges": []}
+        else:
+            min_d = max(min(distances), 0.1)
+            max_d = max(distances)
+            if min_d == max_d:
+                max_d = min_d * 10
+            num_edges = 30
+            log_min = math.log10(min_d)
+            log_max = math.log10(max_d)
+            step = (log_max - log_min) / (num_edges - 1)
+            edges = [10 ** (log_min + i * step) for i in range(num_edges)]
+            counts = [0] * (num_edges - 1)
+            for d in distances:
+                placed = False
+                for i in range(len(counts)):
+                    if edges[i] <= d < edges[i + 1] or (i == len(counts) - 1 and d == edges[i + 1]):
+                        counts[i] += 1
+                        placed = True
+                        break
+                if not placed:
+                    if d < edges[0]:
+                        counts[0] += 1
+                    elif d > edges[-1]:
+                        counts[-1] += 1
+            bins = [round(b, 2) for b in edges[:-1]]
+            bin_edges = [round(b, 2) for b in edges]
+            result = {"bins": bins, "counts": counts, "bin_edges": bin_edges}
+        self._cache["distance_histogram"] = result
+        return result
 
     def invalidate(self) -> None:
-        self._cached_summary = None
+        self._cache.clear()
+        self._cached_planets = None

@@ -5,7 +5,21 @@ from typing import Any
 from cosmosdb.domain.entities import Planet, PlanetBuilder
 
 
-def planet(planet_id: int, name: str, *, orbit: float | None = 1.0, mass: float | None = 1.0) -> Planet:
+def planet(
+    planet_id: int,
+    name: str,
+    *,
+    orbit: float | None = 1.0,
+    mass: float | None = 1.0,
+    discovery_year: int | None = 2020,
+    discovery_method: str | None = "Transit",
+    discovery_facility: str | None = "Kepler",
+    spectral_type: str | None = "G2V",
+    distance_ly: float | None = 100.0,
+    metallicity: float | None = 0.05,
+    period: float | None = 365.25,
+    eccentricity: float | None = 0.02,
+) -> Planet:
     return (
         PlanetBuilder()
         .set("planet_id", planet_id)
@@ -16,11 +30,18 @@ def planet(planet_id: int, name: str, *, orbit: float | None = 1.0, mass: float 
         .set("mass_earth", mass)
         .set("temperature_k", 288.0)
         .set("orbit_au", orbit)
+        .set("orbital_period_days", period)
+        .set("eccentricity", eccentricity)
         .set("star_temperature_k", 5778.0)
         .set("star_radius_solar", 1.0)
         .set("star_mass_solar", 1.0)
         .set("star_luminosity_log10", 0.0)
-        .set("discovery_method", "Transit")
+        .set("discovery_year", discovery_year)
+        .set("discovery_method", discovery_method)
+        .set("discovery_facility", discovery_facility)
+        .set("star_spectral_type", spectral_type)
+        .set("distance_ly", distance_ly)
+        .set("star_metallicity", metallicity)
         .build()
     )
 

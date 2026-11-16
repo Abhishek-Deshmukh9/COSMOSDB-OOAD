@@ -31,8 +31,34 @@ def seed() -> None:
         if cursor.fetchone()[0]:
             raise RuntimeError("The planet table is not empty; refusing to duplicate seed data.")
 
-        constellation_rows: list[tuple[Any, ...]] = []
+        from collections import defaultdict
+
+        grouped_constellations: dict[str, list[dict[str, str]]] = defaultdict(list)
         for row in constellations:
+            grouped_constellations[row["constellation_name"]].append(row)
+
+        constellation_rows: list[tuple[Any, ...]] = []
+        for name, group in grouped_constellations.items():
+            first = group[0]
+            if len(group) == 1:
+                min_ra = float(first["min_ra"])
+                max_ra = float(first["max_ra"])
+                min_dec = float(first["min_dec"])
+                max_dec = float(first["max_dec"])
+            else:
+                # Merge multi-part/wraparound bounding box (e.g. crossing 0/360 meridian)
+                ra_segments = [(float(r["min_ra"]), float(r["max_ra"])) for r in group]
+                high_seg = next((seg for seg in ra_segments if seg[1] == 360.0), None)
+                low_seg = next((seg for seg in ra_segments if seg[0] == 0.0), None)
+                if high_seg and low_seg:
+                    min_ra = high_seg[0]
+                    max_ra = low_seg[1]
+                else:
+                    min_ra = min(s[0] for s in ra_segments)
+                    max_ra = max(s[1] for s in ra_segments)
+                min_dec = min(float(r["min_dec"]) for r in group)
+                max_dec = max(float(r["max_dec"]) for r in group)
+
             cursor.execute(
                 """
                 INSERT INTO constellation
@@ -40,14 +66,12 @@ def seed() -> None:
                 VALUES (%s, %s, %s, %s, %s, %s, %s)
                 """,
                 (
-                    row["constellation_name"], float(row["min_ra"]), float(row["max_ra"]),
-                    float(row["min_dec"]), float(row["max_dec"]), row["description"],
-                    int(row["pop_rank"]),
+                    name, min_ra, max_ra, min_dec, max_dec,
+                    first["description"], int(first["pop_rank"]),
                 ),
             )
             constellation_rows.append((
-                int(cursor.lastrowid), row["constellation_name"], float(row["min_ra"]),
-                float(row["max_ra"]), float(row["min_dec"]), float(row["max_dec"]),
+                int(cursor.lastrowid), name, min_ra, max_ra, min_dec, max_dec,
             ))
 
         systems: dict[str, tuple[int, dict[str, str]]] = {}

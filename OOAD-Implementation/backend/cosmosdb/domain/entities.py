@@ -88,6 +88,10 @@ class Planet:
     star_radius_solar: float | None = None
     star_mass_solar: float | None = None
     star_luminosity_log10: float | None = None
+    distance_ly: float | None = None
+    discovery_facility: str | None = None
+    star_spectral_type: str | None = None
+    star_metallicity: float | None = None
 
 
 class CatalogRecordState(str, Enum):
