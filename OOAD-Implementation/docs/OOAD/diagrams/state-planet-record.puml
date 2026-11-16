@@ -1,0 +1,8 @@
+@startuml
+[*] --> Draft : create request
+Draft --> Cataloged : validate / persist
+Draft --> [*] : validation failure
+Cataloged --> Cataloged : update / validate & invalidate analytics
+Cataloged --> Removed : delete / publish change event
+Removed --> [*]
+@enduml

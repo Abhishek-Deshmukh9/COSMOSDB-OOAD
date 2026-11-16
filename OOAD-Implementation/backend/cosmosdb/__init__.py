@@ -1,0 +1,1 @@
+"""Layered COSMODB-OOAD application."""

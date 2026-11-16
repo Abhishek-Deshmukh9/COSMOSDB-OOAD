@@ -1,0 +1,169 @@
+@startuml
+skinparam classAttributeIconSize 0
+package "domain" {
+  class CelestialCoordinates {
+    +ra: float
+    +dec: float
+  }
+  class CelestialBoundingBox {
+    +min_ra: float
+    +max_ra: float
+    +min_dec: float
+    +max_dec: float
+    +contains(coordinates): bool
+  }
+  class Constellation {
+    +constellation_id: int?
+    +name: str
+    +boundaries: tuple
+    +contains(coordinates): bool
+  }
+  class Star {
+    +star_id: int
+    +system_id: int
+    +name: str
+  }
+  class StarSystem {
+    +system_id: int
+    +name: str
+    +coordinates: CelestialCoordinates?
+    +constellation_id: int?
+    +stars: tuple[Star,...]
+    +planet_count: int
+  }
+  class Discovery {
+    +discovery_id: int
+    +year: int?
+    +method: str?
+  }
+  class Planet {
+    +planet_id: int
+    +name: str
+    +system_id: int
+    +discovery_id: int?
+    +radius_earth: float?
+    +mass_earth: float?
+  }
+  class HabitableZone {
+    +inner_au: float
+    +outer_au: float
+    +classify(orbit_au): str
+  }
+  class HabitableZoneCalculator {
+    +calculate(luminosity_solar): HabitableZone?
+  }
+  class ESIResult {
+    +interior: float?
+    +surface: float?
+    +base: float?
+    +score: float?
+    +zone_status: str
+  }
+  class PlanetBuilder {
+    +set(name, value): PlanetBuilder
+    +build(): Planet
+  }
+  class ESICalculator {
+    +calculate(planet): ESIResult
+  }
+  interface IESIScoringStrategy {
+    +score(base_score, zone_status): float?
+  }
+  class StandardESIStrategy
+  class HabitabilityWeightedStrategy
+  class PlanetCatalogRecord {
+    +planet: Planet
+    +state: CatalogRecordState
+    +catalog(): void
+    +remove(): void
+  }
+  enum CatalogRecordState {
+    DRAFT
+    CATALOGED
+    REMOVED
+  }
+}
+package "application" {
+  interface IPlanetRepository {
+    +list(filters, sort, page, limit)
+    +find_by_id(id): Planet?
+    +find_by_ids(ids): list[Planet]
+    +all_for_analytics(): list[Planet]
+    +create(planet): Planet
+    +update(id, changes): Planet?
+    +delete(id): bool
+  }
+  interface IStarSystemRepository {
+    +list(filters, page, limit)
+    +find_by_id(id)
+    +stars_by_system(id)
+    +planet_count(id): int
+    +count(): int
+  }
+  interface IConstellationRepository {
+    +list()
+  }
+  class PlanetCatalogService {
+    +browse(filters, sort, page, limit)
+    +get(id)
+    +compare(ids)
+    +create(values)
+    +update(id, changes)
+    +delete(id)
+  }
+  class StarSystemCatalogService {
+    +browse(filters, page, limit)
+    +get(id)
+  }
+  class AnalyticsService {
+    +summary()
+    +invalidate()
+  }
+  class CatalogEventPublisher {
+    +subscribe(listener)
+    +publish(event)
+  }
+  interface ICatalogChangeListener
+  class AnalyticsCacheObserver
+  class CatalogAuditLogObserver
+}
+package "infrastructure" {
+  class MySQLPlanetRepository
+  class MySQLStarSystemRepository
+  class MySQLConstellationRepository
+}
+package "FastAPI endpoints" as API {
+}
+StarSystem "1" *-- "1..*" Star
+StarSystem "1" <-- "0..*" Planet : system_id
+Planet "0..*" --> "0..1" Discovery : discovery_id
+Constellation "0..1" <-- "0..*" StarSystem : constellation_id
+Constellation "1" *-- "1..*" CelestialBoundingBox
+CelestialBoundingBox ..> CelestialCoordinates
+StarSystem "1" *-- "0..1" CelestialCoordinates
+PlanetBuilder ..> Planet : builds
+ESICalculator --> IESIScoringStrategy
+ESICalculator ..> ESIResult
+ESICalculator ..> HabitableZone
+IESIScoringStrategy <|.. StandardESIStrategy
+IESIScoringStrategy <|.. HabitabilityWeightedStrategy
+PlanetCatalogService --> IPlanetRepository
+StarSystemCatalogService --> IStarSystemRepository
+StarSystemCatalogService --> IPlanetRepository
+AnalyticsService --> IPlanetRepository
+PlanetCatalogService --> ESICalculator
+PlanetCatalogService ..> PlanetBuilder
+PlanetCatalogService ..> PlanetCatalogRecord
+PlanetCatalogService --> CatalogEventPublisher
+ESICalculator --> HabitableZoneCalculator
+MySQLPlanetRepository ..|> IPlanetRepository
+MySQLStarSystemRepository ..|> IStarSystemRepository
+MySQLConstellationRepository ..|> IConstellationRepository
+CatalogEventPublisher o--> ICatalogChangeListener
+ICatalogChangeListener <|.. AnalyticsCacheObserver
+ICatalogChangeListener <|.. CatalogAuditLogObserver
+API ..> PlanetCatalogService
+API ..> StarSystemCatalogService
+API ..> ConstellationCatalogService
+API ..> AnalyticsService
+@enduml

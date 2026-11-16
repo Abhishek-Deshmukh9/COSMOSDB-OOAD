@@ -1,0 +1,23 @@
+@startuml
+left to right direction
+actor Explorer
+actor Curator
+rectangle "COSMODB-OOAD" {
+  usecase "Search star systems" as UC1
+  usecase "View system details" as UC2
+  usecase "Search and filter planets" as UC3
+  usecase "View planet details and ESI" as UC4
+  usecase "Compare 2–4 planets" as UC5
+  usecase "View analytics summary" as UC6
+  usecase "Manage planet catalog record" as UC7
+}
+Explorer --> UC1
+Explorer --> UC2
+Explorer --> UC3
+Explorer --> UC4
+Explorer --> UC5
+Explorer --> UC6
+Curator --> UC7
+UC2 ..> UC1 : <<extend>>
+UC4 ..> UC3 : <<extend>>
+@enduml
