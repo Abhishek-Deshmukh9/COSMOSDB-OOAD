@@ -1,0 +1,119 @@
+@startuml activity-esi-calculation
+title ESI and Habitable Zone Assessment Workflow
+skinparam activityBackgroundColor #FEFECE
+skinparam activityBorderColor #A80036
+skinparam arrowColor #A80036
+
+start
+:Receive Planet Entity;
+
+partition "Parameter Extraction & Fallbacks" {
+  if (Planet density provided?) then (yes)
+    :Use stored density;
+  else (no)
+    if (Mass > 0 and Radius > 0?) then (yes)
+      :Estimate density = (Mass / Radius^3) * 5.51;
+    else (no)
+      :Density = None;
+    endif
+  endif
+
+  if (Star luminosity log10 provided?) then (yes)
+    :Luminosity = 10^star_luminosity_log10;
+  else (no)
+    if (Star radius & temperature provided?) then (yes)
+      :Luminosity = Radius^2 * (Temp / 5778)^4;
+    else (no)
+      :Luminosity = None;
+    endif
+  endif
+
+  if (Orbit distance AU provided?) then (yes)
+    :Use stored orbit AU;
+  else (no)
+    if (Period and Star mass provided?) then (yes)
+      :Calculate orbit via Kepler's 3rd Law:
+      d = ((Period_yr^2) * Star_mass)^(1/3);
+    else (no)
+      :Orbit AU = None;
+    endif
+  endif
+
+  if (Surface temperature K provided?) then (yes)
+    :Use stored temperature;
+  else (no)
+    if (Luminosity and Orbit AU provided?) then (yes)
+      :Estimate temp = 278 * (Luminosity / d^2)^0.25;
+    else (no)
+      :Temperature = None;
+    endif
+  endif
+
+  if (Mass > 0 and Radius > 0?) then (yes)
+    :Escape velocity = sqrt(Mass / Radius) * 11.19;
+  else (no)
+    :Escape velocity = None;
+  endif
+}
+
+partition "ESI Term Computations" {
+  if (Radius and Density available?) then (yes)
+    :r_term = (1 - |R - 1| / (R + 1))^0.57;
+    :d_term = (1 - |D - 5.51| / (D + 5.51))^1.07;
+    :ESI_interior = sqrt(max(0, r_term * d_term));
+  else (no)
+    :ESI_interior = None;
+  endif
+
+  if (Escape velocity and Temperature available?) then (yes)
+    :v_term = (1 - |V - 11.19| / (V + 11.19))^0.70;
+    :t_term = (1 - |T - 288| / (T + 288))^5.58;
+    :ESI_surface = sqrt(max(0, v_term * t_term));
+  else (no)
+    :ESI_surface = None;
+  endif
+
+  if (Both ESI_interior & ESI_surface available?) then (yes)
+    :Base_ESI = sqrt(ESI_interior * ESI_surface);
+  else (no)
+    :Base_ESI = None;
+  endif
+}
+
+partition "Habitable Zone Evaluation" {
+  if (Luminosity available and > 0?) then (yes)
+    :Inner_HZ = sqrt(Luminosity / 1.1);
+    :Outer_HZ = sqrt(Luminosity / 0.53);
+    :Instantiate HabitableZone(inner, outer);
+    if (Orbit AU available?) then (yes)
+      if (Orbit < Inner_HZ) then (yes)
+        :Zone Status = "TOO_HOT";
+      elseif (Orbit > Outer_HZ) then (yes)
+        :Zone Status = "TOO_COLD";
+      else (within bounds)
+        :Zone Status = "HABITABLE";
+      endif
+    else (no)
+      :Zone Status = "UNKNOWN";
+    endif
+  else (no)
+    :Zone Status = "UNKNOWN";
+    :HabitableZone = None;
+  endif
+}
+
+partition "Strategy Pattern Scoring" {
+  if (Strategy == HabitabilityWeightedStrategy?) then (yes)
+    if (Base_ESI != None and Zone Status not in (HABITABLE, UNKNOWN)) then (apply penalty)
+      :Final ESI = Base_ESI * 0.1;
+    else (normal)
+      :Final ESI = Base_ESI;
+    endif
+  else (StandardESIStrategy)
+    :Final ESI = Base_ESI;
+  endif
+}
+
+:Package and return immutable ESIResult;
+stop
+@enduml

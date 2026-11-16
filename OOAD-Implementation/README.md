@@ -1,89 +1,120 @@
-# COSMODB-OOAD
+# COSMOSDB-OOAD
 
-An OOAD-focused implementation of the COSMODB exoplanet catalog. This project lives beside the original prototype and does not modify it.
+An OOAD-focused implementation of the COSMOSDB exoplanet catalog and comparative planetology platform. This project lives beside the original prototype and maintains strict adherence to SOLID, clean architecture, Domain-Driven Design (DDD), and GoF design patterns.
 
-## MVP
+## Features & Capabilities
 
-- Search and browse star systems; open a system with its stars and planets.
-- Search and filter planets by discovery method; inspect planet properties.
-- Compare two to four planets.
-- Review a small analytics summary and the standard Earth Similarity Index (ESI).
-- Add, update, and remove planet records through the API.
+- **Star System & Planet Exploration:** Search, browse, and explore systems with their host stars and independent planet aggregates.
+- **Dedicated Comparative Planetology (`/compare`):** Side-by-side scientific comparison of up to 4 exoplanets with Earth Similarity Index gauges, habitable zone status, physical parameters, and comparative metrics.
+- **Domain Services:**
+  - `ESICalculator`: Modular calculation of interior, surface, and global Earth Similarity Index.
+  - `PlanetClassifier`: Radius and mass-fallback classification into canonical archetypes (*Terrestrial / Rocky*, *Super-Earth*, *Mini-Neptune*, *Gas Giant*, *Super-Jupiter*).
+  - Habitable Zone assessment with inner/outer boundaries based on stellar luminosity.
+- **Pre-Aggregated Analytics Dashboard (`/analytics`):** 9 real-time analytical datasets powered by GoF Observer cache invalidation:
+  1. Overview Summary Stats
+  2. Earth Similarity Index (ESI) Sunburst Tier Distribution
+  3. Discovery Methods Timeline
+  4. Mass-Radius Logarithmic Scatter Plot
+  5. Stellar Spectral Type Distribution (O, B, A, F, G, K, M, Other)
+  6. Multi-Planet System Complexity
+  7. Orbital Period vs. Eccentricity Scatter Plot
+  8. Stellar Metallicity vs. Planet Count
+  9. Distance Distribution Log-Spaced Histogram
+- **Interactive 3D Visualizations:** Orbital simulation canvas (`OrbitVisualizer`), space canvas background (`SpaceCanvas`), dynamic ESI gauge dials (`ESIGauge`), and habitable zone trackers (`ZoneTracker`).
 
-The standard ESI remains independent from the habitable-zone assessment. The API also supports an explicitly selected `habitability` scoring strategy.
+---
 
-## Stack and boundaries
+## Architectural Principles & GoF Patterns
 
-- `backend/cosmosdb/domain`: entities, value objects, catalog lifecycle and ESI policies.
-- `backend/cosmosdb/application`: use-case services, repository ports, and catalog-change observers.
-- `backend/cosmosdb/infrastructure`: MySQL repositories and database connection configuration.
-- `backend/cosmosdb/api`: FastAPI endpoints and request validation.
-- `frontend`: independent React + TypeScript + Vite catalog UI.
-- `database`: MySQL schema. The seed script reads the existing CSVs from the adjacent `data` folder, or `COSMOSDB_DATA_DIR`.
-- `docs/OOAD/diagrams`: editable PlantUML and rendered SVGs.
+1. **Dependency Inversion Principle (DIP):** Presentation and application layers depend solely on repository protocols (`IPlanetRepository`, `IStarSystemRepository`, `IConstellationRepository`), never on concrete database drivers.
+2. **DDD Aggregate Boundaries:**
+   - `StarSystem` is an Aggregate Root compositing its cataloged `Star` entities ($1 \mathbin{◆\!\!-\!\!-} 1..*$).
+   - `Planet` is an autonomous Aggregate Root referencing its host system strictly by identity (`system_id: int`), completely eliminating cyclical dependencies.
+   - `StarSystem.planet_count` is derived dynamically from `COUNT(*)` in the Planet repository, preventing drifting state.
+3. **Spherical Coordinate Wraparound:** `CelestialBoundingBox` natively supports interval wraparound across the $0^\circ/360^\circ$ meridian (`min_ra > max_ra`). Database seeding deduplicates multi-box constellations (e.g., Cassiopeia) into a single entity.
+4. **Design Patterns:**
+   - **Strategy (GoF):** `IESIScoringStrategy` allows switching between `StandardESIStrategy` (authoritative baseline) and `HabitabilityWeightedStrategy` (applies a 90% penalty to planets outside the habitable zone).
+   - **Observer (GoF):** `CatalogEventPublisher` notifies `AnalyticsCacheObserver` to invalidate cached analytics and `CatalogAuditLogObserver` to record mutations upon any catalog changes.
+   - **Builder (GoF):** `PlanetBuilder` validates domain constraints (e.g. non-physical measurements) and safely constructs immutable `Planet` aggregates with optional measurements and fallback estimates.
 
-The application computes planet counts from `Planet` rows; it does not rely on the legacy `StarSystem.num_planets` value.
+---
 
-## Windows setup
+## Windows Quickstart
 
-### 1. Database and seed data
+### 1. Database and Seed Data
 
-From this directory, execute `database\schema.sql` with the MySQL command-line client:
+Execute `database\schema.sql` with MySQL:
 
 ```powershell
 cmd /c "mysql -u root -p < database\schema.sql"
 ```
 
-Copy `.env.example` to `backend\.env` and set your local MySQL credentials. The adjacent `data\ExoplanetDataset.csv` and `data\Constellations.csv` are used by default. To place them elsewhere, set `COSMOSDB_DATA_DIR` in `backend\.env`.
-
-### 2. Backend
+Configure local credentials in `backend\.env` (see `.env.example`).
+Run the deduplicated seed script:
 
 ```powershell
 Set-Location backend
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install -r requirements.txt
-python scripts\seed_database.py
-python -m unittest discover -s tests -v
-uvicorn main:app --reload
+.\.venv\Scripts\python.exe scripts\seed_database.py
 ```
 
-The API is available at `http://127.0.0.1:8000`; interactive API documentation is at `/docs`. The seed script refuses to run when the Planet table already contains records.
+### 2. Backend API Service
 
-### 3. Frontend
+```powershell
+Set-Location backend
+.\.venv\Scripts\python.exe -m unittest discover -s tests -v
+.\.venv\Scripts\python.exe -m uvicorn cosmosdb.api.app:app --host 127.0.0.1 --port 8000 --reload
+```
 
-In another terminal:
+Interactive OpenAPI documentation is available at `http://127.0.0.1:8000/docs`.
+
+### 3. Frontend Web Application
 
 ```powershell
 Set-Location frontend
-npm install
+npm install --legacy-peer-deps
 npm run dev
 ```
 
-Open the Vite URL (by default `http://127.0.0.1:5173`). Override the API URL with `VITE_API_BASE_URL` if the backend is hosted elsewhere.
+Open `http://127.0.0.1:5173` in your browser.
 
-## API overview
+---
 
-| Endpoint | Purpose |
-|---|---|
-| `GET /api/systems` | Search and page through star systems |
-| `GET /api/systems/{system_id}` | Retrieve a system with its stars and planets |
-| `GET /api/planets` | Search, filter, sort, and page through planets |
-| `GET /api/planets/{planet_id}` | Retrieve a planet and ESI details |
-| `GET /api/planets/compare?planet_ids=1&planet_ids=2` | Compare two to four planets |
-| `POST/PATCH/DELETE /api/planets` | Manage catalog records |
-| `GET /api/analytics/summary` | Return catalog counts and mean available ESI |
+## Complete API Specification
 
-Database failures are reported as `503`; invalid input, missing records, and catalog constraint conflicts return `422`, `404`, and `409`.
+| Method | Endpoint | Description |
+|---|---|---|
+| `GET` | `/api/systems` | Paginated search of star systems |
+| `GET` | `/api/systems/{id}` | System detail with owned stars and child planets |
+| `GET` | `/api/planets` | Paginated planet catalog with filtering & ESI sorting |
+| `GET` | `/api/planets/{id}` | Planet detail with ESI terms and archetype |
+| `GET` | `/api/planets/compare` | Multi-planet comparison matrix (2 to 4 planets) |
+| `POST` | `/api/planets` | Create a new cataloged exoplanet |
+| `PATCH`| `/api/planets/{id}` | Update existing exoplanet measurements |
+| `DELETE`| `/api/planets/{id}` | Remove exoplanet from catalog |
+| `GET` | `/api/discovery-methods` | List distinct discovery methods |
+| `GET` | `/api/constellations` | List cataloged constellations with system counts |
+| `GET` | `/api/analytics/summary` | Global counts, multi-planet systems, top facility |
+| `GET` | `/api/analytics/esi-distribution`| ESI tier breakdown (Earth-like, Potential, etc.) |
+| `GET` | `/api/analytics/discovery-timeline`| Historical discovery counts by method per year |
+| `GET` | `/api/analytics/mass-radius-scatter`| Logarithmic mass-radius coordinates |
+| `GET` | `/api/analytics/spectral-types` | Host star spectral classification counts |
+| `GET` | `/api/analytics/system-complexity`| System counts grouped by planet quantity |
+| `GET` | `/api/analytics/eccentricity-period`| Orbital period vs. eccentricity distribution |
+| `GET` | `/api/analytics/metallicity-planets`| Host star metallicity vs. system planet count |
+| `GET` | `/api/analytics/distance-histogram`| Log-spaced distance distribution bins |
 
-## Tests and UML
+---
 
-Run backend domain, service, and API tests with `python -m unittest discover -s tests -v` from `backend`.
+## UML Diagrams
 
-The `.puml` files in `docs/OOAD/diagrams` are the editable sources. Render them with:
+All UML diagrams are authored in PlantUML under `docs/OOAD/diagrams/` with rendered SVGs:
 
-```powershell
-python scripts\render_diagrams.py
-```
-
-The renderer uses a local PlantUML installation or `PLANTUML_JAR`; see the script's diagnostic if Java or the renderer is unavailable. Update diagrams whenever implementation changes affect their content.
+1. `class-diagram.puml` / `class-diagram.svg` — Complete domain, application, and infrastructure model.
+2. `object-diagram.puml` / `object-diagram.svg` — Grounded instance graph (Kepler-186 system).
+3. `package-component.puml` / `package-component.svg` — Layered architectural package structure.
+4. `use-case.puml` / `use-case.svg` — Use case model for astronomer/explorer interactions.
+5. `activity-search-system.puml` / `activity-search-system.svg` — System search & detail workflow.
+6. `activity-esi-calculation.puml` / `activity-esi-calculation.svg` — Parameter fallbacks, ESI & HZ workflow.
+7. `sequence-search-system.puml` / `sequence-search-system.svg` — Interaction sequence for system browsing.
+8. `sequence-compare-planets.puml` / `sequence-compare-planets.svg` — Interaction sequence for planet comparison.
+9. `state-planet-record.puml` / `state-planet-record.svg` — Planet catalog curation lifecycle states.
