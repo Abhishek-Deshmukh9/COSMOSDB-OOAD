@@ -1,0 +1,24 @@
+@startuml
+actor Explorer
+participant "React UI" as UI
+participant "FastAPI" as API
+participant "StarSystemCatalogService" as Service
+participant "IStarSystemRepository" as Systems
+participant "IPlanetRepository" as Planets
+Explorer -> UI : search systems(query)
+UI -> API : GET /api/systems?q=...
+API -> Service : browse(query, page, limit)
+Service -> Systems : list(query, page, limit)
+Systems --> Service : system summaries + total
+Service --> API : paginated result
+API --> UI : 200 JSON
+Explorer -> UI : open system
+UI -> API : GET /api/systems/{id}
+API -> Service : get(system_id)
+Service -> Systems : find_by_id(system_id)
+Service -> Systems : stars_by_system(system_id)
+Service -> Systems : planet_count(system_id)
+Service -> Planets : find_by_ids_for_system(system_id)
+Service --> API : system detail + stars + planets
+API --> UI : 200 JSON
+@enduml

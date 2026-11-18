@@ -1,0 +1,20 @@
+@startuml
+actor Explorer
+participant "React UI" as UI
+participant "FastAPI" as API
+participant "PlanetCatalogService" as Service
+participant "IPlanetRepository" as Repository
+participant "ESICalculator" as ESI
+Explorer -> UI : select 2–4 planets
+UI -> API : GET /api/planets/compare?planet_ids=...
+API -> Service : compare(ids)
+Service -> Service : validate distinct count
+Service -> Repository : find_by_ids(ids)
+Repository --> Service : Planet aggregates
+loop each selected planet
+  Service -> ESI : calculate(planet)
+  ESI --> Service : ESIResult + zone status
+end
+Service --> API : ordered comparison details
+API --> UI : 200 JSON
+@enduml

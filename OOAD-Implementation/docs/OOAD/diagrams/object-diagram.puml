@@ -1,0 +1,40 @@
+@startuml
+object "cygnus : Constellation" as cygnus {
+  name = "Cygnus"
+  boundaries = [286.5..330.0, 27.7..61.6]
+}
+object "keplerSystem : StarSystem" as system {
+  name = "Kepler-186"
+  coordinates = (298.652736, 43.9549884)
+  distance_ly ≈ 579.2
+  planet_count = 5
+}
+object "keplerStar : Star" as star {
+  name = "Kepler-186"
+  spectral_type = "M1"
+  temperature_k = 3755
+  radius_solar = 0.523
+  mass_solar = 0.544
+}
+object "keplerPlanet : Planet" as planet {
+  name = "Kepler-186 f"
+  radius_earth = 1.17
+  mass_earth = 1.71
+  density = 5.87
+  temperature_k = 177
+  orbit_au = 0.432
+  orbital_period_days ≈ 129.9441
+}
+object "keplerDiscovery : Discovery" as discovery {
+  year = 2014
+  method = "Transit"
+}
+system *-- star : owns
+planet --> system : system_id
+planet --> discovery : discovery_id
+system ..> cygnus : constellation
+note bottom
+  Values are from the checked-in exoplanet and constellation CSVs.
+  Planet-to-system remains an identity association, not composition.
+end note
+@enduml

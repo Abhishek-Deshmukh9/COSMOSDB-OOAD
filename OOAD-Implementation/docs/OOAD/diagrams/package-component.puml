@@ -1,0 +1,31 @@
+@startuml
+package "frontend" {
+  [React Views]
+  [HTTP API client]
+  [React Views] --> [HTTP API client]
+}
+package "backend" {
+  package "api" {
+    [FastAPI routes]
+  }
+  package "application" {
+    [Use-case services]
+    [Repository ports]
+    [Catalog event publisher]
+  }
+  package "domain" {
+    [Entities and value objects]
+    [ESI strategies]
+  }
+  package "infrastructure" {
+    [MySQL repositories]
+  }
+}
+database "MySQL" as db
+[HTTP API client] --> [FastAPI routes] : HTTP/JSON
+[FastAPI routes] --> [Use-case services]
+[Use-case services] --> [Entities and value objects]
+[Use-case services] --> [Repository ports]
+[MySQL repositories] ..|> [Repository ports]
+[MySQL repositories] --> db
+@enduml

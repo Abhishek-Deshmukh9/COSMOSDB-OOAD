@@ -1,0 +1,23 @@
+@startuml
+start
+:Enter system search;
+:Validate query and page limits;
+if (Input valid?) then (yes)
+  :Query StarSystem repository;
+  if (Any matching systems?) then (yes)
+    :Display paginated systems;
+    if (Explorer opens a result?) then (yes)
+      :Load system and owned stars;
+      :Load planets by system identity;
+      :Display system detail;
+    else (no)
+      :Continue browsing results;
+    endif
+  else (no)
+    :Display empty-result state;
+  endif
+else (no)
+  :Return validation error;
+endif
+stop
+@enduml
