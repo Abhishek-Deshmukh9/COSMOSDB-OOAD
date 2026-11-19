@@ -90,6 +90,63 @@ class CatalogApiTests(unittest.TestCase):
         response = asyncio.run(send())
         self.assertEqual(response.status_code, 409)
 
+    def test_crud_aliases_and_cors_preflight(self) -> None:
+        # 1. Test CORS preflight for PUT
+        cors_res = self.request(
+            "OPTIONS",
+            "/api/crud/planets/1",
+            headers={
+                "Origin": "http://127.0.0.1:5173",
+                "Access-Control-Request-Method": "PUT",
+                "Access-Control-Request-Headers": "content-type",
+            },
+        )
+        self.assertEqual(cors_res.status_code, 200)
+        self.assertIn("access-control-allow-origin", cors_res.headers)
+
+        # 2. Test POST /api/crud/planets with empty name returns 422
+        bad_create = self.request("POST", "/api/crud/planets", json={"planet_name": ""})
+        self.assertEqual(bad_create.status_code, 422)
+
+        # 3. Test POST /api/crud/planets with valid data
+        good_create = self.request(
+            "POST",
+            "/api/crud/planets",
+            json={
+                "mode": "new",
+                "planet_name": "Kepler-999 b",
+                "system_name": "Kepler-999",
+                "radius_earth": 1.2,
+                "mass_earth": 1.5,
+            },
+        )
+        self.assertEqual(good_create.status_code, 201)
+        created_id = good_create.json()["planet_id"]
+
+        # 4. Test PUT /api/crud/planets/{id} update (System Edit mode save)
+        update_res = self.request(
+            "PUT",
+            f"/api/crud/planets/{created_id}",
+            json={
+                "planet_name": "teegarden x",
+                "radius_earth": 1.25,
+                "mass_earth": 1.55,
+                "num_stars": 4,  # Extra fields in form must be ignored cleanly
+            },
+        )
+        self.assertEqual(update_res.status_code, 200)
+        self.assertEqual(update_res.json()["planet_name"], "teegarden x")
+
+        # 5. Test PUT /api/crud/stars and /api/crud/systems
+        self.assertEqual(
+            self.request("PUT", "/api/crud/stars/1", json={"star_name": "New Star"}).status_code,
+            200,
+        )
+        self.assertEqual(
+            self.request("PUT", "/api/crud/systems/101", json={"system_name": "New System"}).status_code,
+            200,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

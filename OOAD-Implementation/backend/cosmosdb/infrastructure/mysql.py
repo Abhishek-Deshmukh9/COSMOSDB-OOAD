@@ -335,6 +335,118 @@ class MySQLStarSystemRepository:
         rows = self._fetch("SELECT COUNT(*) AS total FROM starsystem", [])
         return int(rows[0]["total"])
 
+    def create_system(self, system_name: str, constellation_id: int | None = None,
+                      distance_ly: float | None = None, num_stars: int = 1,
+                      num_moons: int = 0, star_name: str | None = None,
+                      star_data: dict[str, Any] | None = None) -> int:
+        connection = self._connection_factory()
+        cursor = connection.cursor(dictionary=True)
+        try:
+            cursor.execute("SELECT system_id FROM starsystem WHERE system_name = %s", (system_name,))
+            existing = cursor.fetchone()
+            if existing:
+                return int(existing["system_id"])
+
+            ra, dec = None, None
+            if constellation_id:
+                cursor.execute(
+                    "SELECT min_ra, max_ra, min_dec, max_dec FROM constellation WHERE constellation_id = %s",
+                    (constellation_id,)
+                )
+                crow = cursor.fetchone()
+                if crow:
+                    ra = (crow["min_ra"] + crow["max_ra"]) / 2.0
+                    dec = (crow["min_dec"] + crow["max_dec"]) / 2.0
+
+            cursor.execute(
+                """
+                INSERT INTO starsystem (system_name, ra, `dec`, num_stars, num_planets, num_moons, distance_ly, constellation_id)
+                VALUES (%s, %s, %s, %s, 0, %s, %s, %s)
+                """,
+                (system_name, ra, dec, num_stars or 1, num_moons or 0, distance_ly, constellation_id)
+            )
+            system_id = int(cursor.lastrowid)
+
+            sdata = star_data or {}
+            sname = star_name or system_name
+            cursor.execute("SELECT star_id FROM star WHERE star_name = %s", (sname,))
+            if cursor.fetchone():
+                sname = f"{sname} Host"
+
+            cursor.execute(
+                """
+                INSERT INTO star (
+                    star_name, system_id, spectral_type, star_temp, star_radius, star_mass,
+                    star_metallicity, star_luminosity, star_gravity, star_age, star_brightness
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """,
+                (
+                    sname, system_id,
+                    sdata.get("spectral_type") or "G",
+                    sdata.get("star_temp"),
+                    sdata.get("star_radius"),
+                    sdata.get("star_mass"),
+                    sdata.get("star_metallicity"),
+                    sdata.get("star_luminosity"),
+                    sdata.get("star_gravity"),
+                    sdata.get("star_age"),
+                    sdata.get("star_brightness"),
+                )
+            )
+            connection.commit()
+            return system_id
+        finally:
+            cursor.close()
+            connection.close()
+
+    def update_star(self, star_id: int, star_data: dict[str, Any]) -> bool:
+        connection = self._connection_factory()
+        cursor = connection.cursor()
+        try:
+            fields = {
+                "star_name": star_data.get("star_name"),
+                "spectral_type": star_data.get("spectral_type") or star_data.get("star_spectral_type"),
+                "star_temp": star_data.get("star_temp"),
+                "star_radius": star_data.get("star_radius"),
+                "star_mass": star_data.get("star_mass"),
+                "star_luminosity": star_data.get("star_luminosity"),
+                "star_gravity": star_data.get("star_gravity"),
+                "star_metallicity": star_data.get("star_metallicity"),
+                "star_age": star_data.get("star_age"),
+                "star_brightness": star_data.get("star_brightness"),
+            }
+            updates = [(k, v) for k, v in fields.items() if v is not None and v != ""]
+            if not updates:
+                return True
+            assignments = ", ".join(f"{k} = %s" for k, _ in updates)
+            cursor.execute(f"UPDATE star SET {assignments} WHERE star_id = %s", [v for _, v in updates] + [star_id])
+            connection.commit()
+            return True
+        finally:
+            cursor.close()
+            connection.close()
+
+    def update_system(self, system_id: int, system_data: dict[str, Any]) -> bool:
+        connection = self._connection_factory()
+        cursor = connection.cursor()
+        try:
+            fields = {
+                "system_name": system_data.get("system_name"),
+                "distance_ly": system_data.get("distance_ly"),
+                "num_stars": system_data.get("num_stars"),
+                "num_moons": system_data.get("num_moons"),
+            }
+            updates = [(k, v) for k, v in fields.items() if v is not None and v != ""]
+            if not updates:
+                return True
+            assignments = ", ".join(f"{k} = %s" for k, _ in updates)
+            cursor.execute(f"UPDATE starsystem SET {assignments} WHERE system_id = %s", [v for _, v in updates] + [system_id])
+            connection.commit()
+            return True
+        finally:
+            cursor.close()
+            connection.close()
+
     def _fetch(self, sql: str, parameters: list[Any]) -> list[dict[str, Any]]:
         connection = self._connection_factory()
         cursor = connection.cursor(dictionary=True)

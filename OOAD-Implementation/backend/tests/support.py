@@ -143,6 +143,18 @@ class FakeSystemRepository:
     def count(self) -> int:
         return 2
 
+    def create_system(self, system_name: str, constellation_id: int | None = None,
+                      distance_ly: float | None = None, num_stars: int = 1,
+                      num_moons: int = 0, star_name: str | None = None,
+                      star_data: dict[str, Any] | None = None) -> int:
+        return 101
+
+    def update_star(self, star_id: int, star_data: dict[str, Any]) -> bool:
+        return True
+
+    def update_system(self, system_id: int, system_data: dict[str, Any]) -> bool:
+        return True
+
 
 class FakeConstellationRepository:
     def list(self) -> list[dict[str, Any]]:

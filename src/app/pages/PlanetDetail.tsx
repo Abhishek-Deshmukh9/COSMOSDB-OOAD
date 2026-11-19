@@ -100,22 +100,46 @@ export default function PlanetDetail() {
 
   const handleSave = async () => {
     try {
-       await fetch(`${API}/api/crud/planets/${data.planet_id}`, {
-           method: "PUT", headers: { "Content-Type": "application/json" },
-           body: JSON.stringify(form)
-       });
-       await fetch(`${API}/api/crud/stars/${data.star_id}`, {
-           method: "PUT", headers: { "Content-Type": "application/json" },
-           body: JSON.stringify(form)
-       });
-       await fetch(`${API}/api/crud/systems/${data.system_id}`, {
-           method: "PUT", headers: { "Content-Type": "application/json" },
-           body: JSON.stringify(form)
-       });
-       setData({ ...data, ...form });
-       setEditMode(false);
-    } catch(err) {
-       alert("Failed to save changes");
+      const res1 = await fetch(`${API}/api/crud/planets/${data.planet_id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(form)
+      });
+      if (!res1.ok) {
+        let msg = "Failed to update planet.";
+        try {
+          const j = await res1.json();
+          msg = j.detail || msg;
+        } catch {
+          msg = await res1.text();
+        }
+        alert(msg);
+        return;
+      }
+
+      if (data.star_id) {
+        await fetch(`${API}/api/crud/stars/${data.star_id}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(form)
+        }).catch(() => {});
+      }
+
+      if (data.system_id) {
+        await fetch(`${API}/api/crud/systems/${data.system_id}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(form)
+        }).catch(() => {});
+      }
+
+      const updated = await res1.json();
+      setData((prev: any) => ({ ...prev, ...form, ...updated }));
+      setForm((prev: any) => ({ ...prev, ...form, ...updated }));
+      setEditMode(false);
+      alert("Changes saved successfully!");
+    } catch(err: any) {
+      alert("Failed to save changes: " + (err.message || err));
     }
   };
 

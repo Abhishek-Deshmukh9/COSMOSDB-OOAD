@@ -88,8 +88,17 @@ def create_app(
     }
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
-        allow_methods=["GET", "POST", "PATCH", "DELETE"],
+        allow_origins=[
+            "http://localhost:5173",
+            "http://127.0.0.1:5173",
+            "http://localhost:3000",
+            "http://127.0.0.1:3000",
+            "http://localhost:8000",
+            "http://127.0.0.1:8000",
+        ],
+        allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1)(:[0-9]+)?$",
+        allow_credentials=True,
+        allow_methods=["*"],
         allow_headers=["*"],
     )
 
@@ -106,8 +115,22 @@ def create_app(
     @app.exception_handler(IntegrityError)
     async def integrity_error_handler(_request: Any, error: IntegrityError) -> Response:
         from fastapi.responses import JSONResponse
-        logging.getLogger("cosmosdb.api").warning("Catalog constraint rejected a mutation: %s", error)
-        return JSONResponse(status_code=409, content={"detail": "Catalog constraint conflict."})
+        err_msg = str(error)
+        logging.getLogger("cosmosdb.api").warning("Catalog constraint rejected a mutation: %s", err_msg)
+        if "Duplicate entry" in err_msg:
+            if "planet_name" in err_msg:
+                detail = "A planet with this name already exists in the catalog. Please choose a unique name."
+            elif "system_name" in err_msg:
+                detail = "A star system with this name already exists. Please choose a different system name or select the existing system."
+            elif "star_name" in err_msg:
+                detail = "A star with this name already exists in the catalog."
+            else:
+                detail = f"Catalog unique constraint conflict: duplicate entry."
+        elif "foreign key constraint" in err_msg.lower():
+            detail = "Referenced catalog entity does not exist."
+        else:
+            detail = "Catalog constraint conflict."
+        return JSONResponse(status_code=409, content={"detail": detail})
 
     @app.exception_handler(mysql.connector.Error)
     async def database_error_handler(_request: Any, error: mysql.connector.Error) -> Response:
@@ -177,32 +200,117 @@ def create_app(
 
     @app.post("/api/crud/planets", status_code=201)
     def create_planet_crud_alias(request: dict[str, Any]) -> dict[str, Any]:
-        sys_id = request.get("system_id") or 1
-        name = request.get("planet_name") or f"Planet-{sys_id}"
-        values = {
-            "name": name,
-            "system_id": int(sys_id),
-            "radius_earth": request.get("radius_earth"),
-            "mass_earth": request.get("mass_earth"),
-            "density": request.get("planet_density"),
-            "temperature_k": request.get("planet_temp"),
-            "orbit_au": request.get("orbit_radius"),
-            "orbital_period_days": request.get("orbital_period"),
-            "eccentricity": request.get("eccentricity"),
-            "insolation_flux": request.get("insolation_flux"),
+        raw_name = request.get("planet_name") or request.get("name")
+        if not raw_name or not str(raw_name).strip():
+            raise ValueError("Target planet name is required.")
+        name = str(raw_name).strip()
+
+        mode = request.get("mode", "existing")
+        sys_id = request.get("system_id")
+
+        if mode == "new" or not sys_id:
+            raw_sys_name = request.get("system_name")
+            sys_name = str(raw_sys_name).strip() if raw_sys_name and str(raw_sys_name).strip() else f"{name} System"
+            constellation_id = request.get("constellation_id")
+            if constellation_id is not None and constellation_id != "":
+                try:
+                    constellation_id = int(constellation_id)
+                except (ValueError, TypeError):
+                    constellation_id = None
+            else:
+                constellation_id = None
+
+            distance_ly = request.get("distance_ly")
+            if distance_ly is not None and distance_ly != "":
+                try:
+                    distance_ly = float(distance_ly)
+                except (ValueError, TypeError):
+                    distance_ly = None
+            else:
+                distance_ly = None
+
+            star_data = {
+                "spectral_type": request.get("spectral_type") or "G",
+                "star_temp": request.get("star_temp"),
+                "star_radius": request.get("star_radius"),
+                "star_mass": request.get("star_mass"),
+                "star_metallicity": request.get("star_metallicity"),
+                "star_luminosity": request.get("star_luminosity"),
+                "star_gravity": request.get("star_gravity"),
+                "star_age": request.get("star_age"),
+                "star_brightness": request.get("star_brightness"),
+            }
+            sys_id = systems.create_or_ensure_system(
+                system_name=sys_name,
+                constellation_id=constellation_id,
+                distance_ly=distance_ly,
+                num_stars=int(request.get("num_stars") or 1),
+                num_moons=int(request.get("num_moons") or 0),
+                star_name=request.get("star_name") or sys_name,
+                star_data=star_data,
+            )
+        else:
+            sys_id = int(sys_id)
+
+        field_map = {
+            "radius_earth": "radius_earth",
+            "mass_earth": "mass_earth",
+            "planet_density": "density",
+            "density": "density",
+            "planet_temp": "temperature_k",
+            "temperature_k": "temperature_k",
+            "orbit_radius": "orbit_au",
+            "orbit_au": "orbit_au",
+            "orbital_period": "orbital_period_days",
+            "orbital_period_days": "orbital_period_days",
+            "eccentricity": "eccentricity",
+            "insolation_flux": "insolation_flux",
         }
+        values: dict[str, Any] = {
+            "name": name,
+            "system_id": sys_id,
+        }
+        for src, target in field_map.items():
+            val = request.get(src)
+            if val is not None and val != "":
+                try:
+                    values[target] = float(val)
+                except (ValueError, TypeError):
+                    continue
+
         return standard_planets.create(values)
 
     @app.put("/api/crud/planets/{planet_id}")
     def update_planet_crud_alias(planet_id: int, request: dict[str, Any]) -> dict[str, Any]:
         name_map = {
             "planet_name": "name",
+            "name": "name",
             "planet_density": "density",
+            "density": "density",
             "planet_temp": "temperature_k",
+            "temperature_k": "temperature_k",
             "orbit_radius": "orbit_au",
+            "orbit_au": "orbit_au",
             "orbital_period": "orbital_period_days",
+            "orbital_period_days": "orbital_period_days",
+            "radius_earth": "radius_earth",
+            "mass_earth": "mass_earth",
+            "eccentricity": "eccentricity",
+            "insolation_flux": "insolation_flux",
         }
-        clean = {name_map.get(k, k): v for k, v in request.items() if v is not None and k in name_map or k in {"radius_earth", "mass_earth", "eccentricity", "insolation_flux"}}
+        clean: dict[str, Any] = {}
+        for src, target in name_map.items():
+            if src in request:
+                val = request[src]
+                if val is not None and val != "":
+                    if target == "name":
+                        clean[target] = str(val).strip()
+                    else:
+                        try:
+                            clean[target] = float(val)
+                        except (ValueError, TypeError):
+                            continue
+
         return standard_planets.update(planet_id, clean) if clean else standard_planets.get(planet_id)
 
     @app.delete("/api/crud/planets/{planet_id}")
@@ -212,11 +320,13 @@ def create_app(
 
     @app.put("/api/crud/stars/{star_id}")
     def update_star_crud_alias(star_id: int, request: dict[str, Any]) -> dict[str, Any]:
-        return {"status": "success"}
+        systems.update_star(star_id, request)
+        return {"status": "success", "star_id": star_id}
 
     @app.put("/api/crud/systems/{system_id}")
     def update_system_crud_alias(system_id: int, request: dict[str, Any]) -> dict[str, Any]:
-        return {"status": "success"}
+        systems.update_system(system_id, request)
+        return {"status": "success", "system_id": system_id}
 
     @app.post("/api/admin/reset")
     def admin_reset_alias() -> dict[str, Any]:

@@ -105,15 +105,24 @@ export default function AddPlanet() {
   };
 
   const submit = async () => {
+    if (!form.planet_name || !form.planet_name.trim()) {
+      alert("Please enter a Target Planet Name.");
+      return;
+    }
     if (mode === "existing" && !selectedSystem) {
-        alert("Please search and select a host system first!");
-        return;
+      alert("Please search and select a host system first!");
+      return;
+    }
+    if (mode === "new" && (!form.system_name || !form.system_name.trim())) {
+      form.system_name = `${form.planet_name.trim()} System`;
     }
     
     try {
       const payload = {
         mode: mode === "new" ? "new" : "existing",
         ...form,
+        planet_name: form.planet_name.trim(),
+        system_name: form.system_name ? form.system_name.trim() : undefined,
         system_id: mode === "existing" ? selectedSystem.system_id : undefined,
         constellation_id: mode === "new" ? parseInt(form.constellation_id) || undefined : undefined,
         num_stars: mode === "new" ? parseInt(form.num_stars) || 1 : undefined,
@@ -143,7 +152,16 @@ export default function AddPlanet() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload)
       });
-      if (!res.ok) throw new Error(await res.text());
+      if (!res.ok) {
+        let errDetail = "Failed to create planet.";
+        try {
+          const errJson = await res.json();
+          errDetail = errJson.detail || JSON.stringify(errJson);
+        } catch {
+          errDetail = await res.text();
+        }
+        throw new Error(errDetail);
+      }
       const data = await res.json();
       navigate(`/planet/${data.planet_id}`);
     } catch(err: any) {
